@@ -1,0 +1,17 @@
+[Unit]
+Description=Agentbox Sandbox Stack
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/agentbox
+ExecStart=/usr/bin/docker compose up -d
+ExecStartPost=-/opt/agentbox/sandctl _autostart
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose restart
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

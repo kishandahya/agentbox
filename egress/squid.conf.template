@@ -1,0 +1,74 @@
+# Agentbox egress proxy – Squid forward proxy with domain allowlist
+# Template variables: {{CACHE_MEM}}, {{MAX_OBJ_SIZE}}
+
+# ---------- Network ----------
+http_port 3128
+
+# ---------- ACLs ----------
+acl localnet src 10.0.0.0/8
+acl localnet src 172.16.0.0/12
+acl localnet src 192.168.0.0/16
+acl localhost src 127.0.0.1/32
+
+# Standard safe ports
+acl SSL_ports port 443
+acl Safe_ports port 80          # http
+acl Safe_ports port 443         # https
+acl Safe_ports port 1025-65535  # unregistered ports
+
+acl CONNECT method CONNECT
+
+# Domain allowlist (one domain per line, leading dot for subdomains)
+acl allowlist dstdomain "/etc/squid/allowlist.txt"
+
+# ---------- Access rules ----------
+# Deny requests to unsafe ports
+http_access deny !Safe_ports
+
+# Deny CONNECT to non-SSL ports
+http_access deny CONNECT !SSL_ports
+
+# Allow localhost unconditionally
+http_access allow localhost
+
+# Allow traffic from localnet to allowlisted domains only
+http_access allow localnet allowlist
+
+# Deny everything else
+http_access deny all
+
+# ---------- HTTPS / CONNECT tunneling ----------
+# SNI-based filtering – no MITM / ssl_bump
+# CONNECT is allowed above via allowlist ACL matching on SNI
+
+# ---------- Cache settings ----------
+cache_mem {{CACHE_MEM}} MB
+maximum_object_size {{MAX_OBJ_SIZE}} MB
+maximum_object_size_in_memory 4 MB
+cache_dir ufs /var/spool/squid 1000 16 256
+cache_replacement_policy heap LFUDA
+memory_replacement_policy heap GDSF
+
+# ---------- Logging to stdout/stderr for docker logs ----------
+access_log stdio:/dev/stdout
+cache_log stdio:/dev/stderr
+cache_store_log none
+
+# ---------- Privacy / identity ----------
+visible_hostname agentbox-proxy
+forwarded_for delete
+via off
+
+# ---------- Timeouts ----------
+connect_timeout 30 seconds
+read_timeout 120 seconds
+request_timeout 60 seconds
+
+# ---------- DNS ----------
+dns_v4_first on
+
+# ---------- PID ----------
+pid_filename /run/squid.pid
+
+# ---------- Shutdown ----------
+shutdown_lifetime 5 seconds

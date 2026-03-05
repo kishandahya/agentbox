@@ -1,0 +1,8 @@
+.env
+*.pem
+id_agentbox*
+egress/squid.conf
+egress/allowlist.txt
+state/
+*.log
+.DS_Store

@@ -1,0 +1,83 @@
+# Agentbox - sandboxed agent execution stack
+# Network topology:
+#   sandbox --(proxy-net)--> egress-proxy --(egress-net)--> internet
+#   sandbox --(sandbox-net)  (internal only, no external access)
+#
+# Security: sandbox has zero direct internet access.
+# All egress is forced through the Squid proxy with a domain allowlist.
+
+services:
+  sandbox:
+    build:
+      context: .
+      dockerfile: agents/${AGENTBOX_PRESET:-opencode}/Dockerfile
+    container_name: agentbox-sandbox
+    hostname: sandbox
+    volumes:
+      - agentbox-workspace:/workspace
+      - ${AGENTBOX_DIR:-/opt/agentbox}/id_agentbox.pub:/run/secrets/authorized_keys:ro
+    env_file: .env
+    networks:
+      sandbox-net:
+      proxy-net:
+    security_opt:
+      - no-new-privileges
+    cap_drop:
+      - ALL
+    # NET_RAW deliberately omitted -- no ping, smaller attack surface
+    cpus: 2
+    mem_limit: 4g
+    memswap_limit: 4g
+    pids_limit: 512
+    tmpfs:
+      - /tmp:size=512m,noexec,nosuid
+    ports:
+      - "${AGENTBOX_SSH_PORT:-2222}:22"
+    depends_on:
+      egress-proxy:
+        condition: service_started
+    environment:
+      HTTP_PROXY: http://egress-proxy:3128
+      HTTPS_PROXY: http://egress-proxy:3128
+      http_proxy: http://egress-proxy:3128
+      https_proxy: http://egress-proxy:3128
+      NO_PROXY: localhost,127.0.0.1
+      no_proxy: localhost,127.0.0.1
+    restart: unless-stopped
+
+  egress-proxy:
+    image: ubuntu/squid:latest
+    container_name: agentbox-egress-proxy
+    hostname: egress-proxy
+    volumes:
+      - ./egress/squid.conf:/etc/squid/squid.conf:ro
+      - ./egress/allowlist.txt:/etc/squid/allowlist.txt:ro
+    networks:
+      proxy-net:
+      egress-net:
+    expose:
+      - "3128"
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
+    restart: unless-stopped
+
+networks:
+  sandbox-net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  proxy-net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+  egress-net:
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.30.2.0/24
+
+volumes:
+  agentbox-workspace:

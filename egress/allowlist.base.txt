@@ -1,0 +1,29 @@
+# AI providers
+.openai.com
+.anthropic.com
+# Package managers
+.pypi.org
+.files.pythonhosted.org
+.npmjs.org
+.registry.npmjs.org
+.crates.io
+.static.crates.io
+# GitHub
+.github.com
+.githubusercontent.com
+.github.io
+# Ubuntu packages
+.ubuntu.com
+.archive.ubuntu.com
+# Go modules
+.golang.org
+.proxy.golang.org
+.sum.golang.org
+.storage.googleapis.com
+# Node
+.nodejs.org
+.yarnpkg.com
+# General
+.docker.io
+.registry-1.docker.io
+.production.cloudflare.docker.com

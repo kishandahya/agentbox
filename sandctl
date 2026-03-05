@@ -1,0 +1,591 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SANDCTL_VERSION="0.1.0"
+AGENTBOX_DIR="${AGENTBOX_DIR:-/opt/agentbox}"
+
+# --- Configuration Loading ---
+
+_load_config() {
+    if [ -f "$AGENTBOX_DIR/.env" ]; then
+        # Source .env but only export known variables
+        set -a
+        source "$AGENTBOX_DIR/.env"
+        set +a
+    fi
+    AGENTBOX_SSH_PORT="${AGENTBOX_SSH_PORT:-2222}"
+    AGENTBOX_PRESET="${AGENTBOX_PRESET:-opencode}"
+    AGENTBOX_STATE_DIR="$AGENTBOX_DIR/state"
+}
+
+# --- SSH Helpers -- CRITICAL: Proper quoting ---
+
+# Non-interactive SSH (for commands)
+_ssh() {
+    ssh -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
+        -i "$AGENTBOX_DIR/id_agentbox" \
+        -p "$AGENTBOX_SSH_PORT" \
+        agent@localhost "$@"
+}
+
+# Interactive SSH (with TTY allocation)
+_ssh_tty() {
+    ssh -t \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
+        -i "$AGENTBOX_DIR/id_agentbox" \
+        -p "$AGENTBOX_SSH_PORT" \
+        agent@localhost "$@"
+}
+
+# SCP helper
+_scp() {
+    scp -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
+        -i "$AGENTBOX_DIR/id_agentbox" \
+        -P "$AGENTBOX_SSH_PORT" \
+        "$@"
+}
+
+# --- Docker Compose Helper ---
+
+_compose() {
+    docker compose -f "$AGENTBOX_DIR/compose.yaml" --project-directory "$AGENTBOX_DIR" "$@"
+}
+
+# --- Guard: Require Sandbox Running ---
+
+_require_running() {
+    if ! _compose ps --format json 2>/dev/null | grep -q '"sandbox".*"running"'; then
+        # Fallback for older docker compose
+        if ! _compose ps 2>/dev/null | grep -q "sandbox.*Up\|sandbox.*running"; then
+            echo "Error: sandbox is not running. Run: sandctl up" >&2
+            exit 1
+        fi
+    fi
+}
+
+# --- Preset Loading ---
+
+_load_preset() {
+    local preset="${1:-$AGENTBOX_PRESET}"
+    local env_file="$AGENTBOX_DIR/agents/$preset/agent.env"
+    if [ ! -f "$env_file" ]; then
+        echo "Error: preset '$preset' not found at $env_file" >&2
+        exit 1
+    fi
+    source "$env_file"
+}
+
+# --- Level 1 Commands ---
+
+cmd_up() {
+    _compose up -d --build
+    echo "Sandbox is up."
+}
+
+cmd_down() {
+    _compose down
+    echo "Sandbox is down."
+}
+
+cmd_restart() {
+    _compose down
+    _compose up -d --build
+    echo "Sandbox restarted."
+}
+
+cmd_status() {
+    echo "=== Agentbox Status ==="
+    _compose ps
+    echo ""
+    echo "Preset: ${AGENTBOX_PRESET}"
+    echo "SSH Port: ${AGENTBOX_SSH_PORT}"
+    if [ -f "$AGENTBOX_STATE_DIR/runtime.json" ]; then
+        echo "Runtime: $(cat "$AGENTBOX_STATE_DIR/runtime.json")"
+    else
+        echo "Runtime: not configured"
+    fi
+}
+
+cmd_logs() {
+    _compose logs "$@"
+}
+
+cmd_ssh() {
+    _require_running
+    if [ $# -eq 0 ]; then
+        _ssh_tty
+    else
+        _ssh_tty "$@"
+    fi
+}
+
+cmd_agent_list() {
+    echo "Available presets:"
+    echo ""
+    printf "  %-12s %-16s %-10s %s\n" "NAME" "IMAGE" "MODE" "REQUIRED VARS"
+    printf "  %-12s %-16s %-10s %s\n" "----" "-----" "----" "-------------"
+    for d in "$AGENTBOX_DIR"/agents/*/; do
+        [ -d "$d" ] || continue
+        (
+            source "$d/agent.env"
+            printf "  %-12s %-16s %-10s %s\n" "$AGENT_ID" "$BASE_IMAGE" "$START_MODE" "${REQUIRED_ENV_VARS:-none}"
+        )
+    done
+    echo ""
+    echo "Active: ${AGENTBOX_PRESET}"
+}
+
+cmd_agent_use() {
+    local preset="$1"
+    [ -d "$AGENTBOX_DIR/agents/$preset" ] || { echo "Error: unknown preset '$preset'" >&2; exit 1; }
+    [ -f "$AGENTBOX_DIR/agents/$preset/agent.env" ] || { echo "Error: preset '$preset' missing agent.env" >&2; exit 1; }
+
+    # Update .env
+    if grep -q '^AGENTBOX_PRESET=' "$AGENTBOX_DIR/.env" 2>/dev/null; then
+        sed -i "s/^AGENTBOX_PRESET=.*/AGENTBOX_PRESET=$preset/" "$AGENTBOX_DIR/.env"
+    else
+        echo "AGENTBOX_PRESET=$preset" >> "$AGENTBOX_DIR/.env"
+    fi
+
+    echo "Preset set to '$preset'."
+    echo "Rebuilding sandbox image..."
+    _compose build sandbox
+    echo "Run 'sandctl restart' to apply."
+}
+
+cmd_egress_reload() {
+    _require_running
+    _compose exec egress-proxy squid -k reconfigure
+    echo "Egress proxy configuration reloaded."
+}
+
+cmd_doctor() {
+    local fix="${1:-}"
+    local issues=0
+    local warnings=0
+
+    echo "=== Agentbox Doctor ==="
+    echo ""
+
+    # 1. Docker
+    if docker info &>/dev/null; then
+        echo "[OK] Docker is running"
+    else
+        echo "[FAIL] Docker is not running"
+        ((issues++))
+    fi
+
+    # 2. Compose stack
+    if _compose ps &>/dev/null; then
+        echo "[OK] Compose stack exists"
+    else
+        echo "[FAIL] Compose stack not found"
+        ((issues++))
+    fi
+
+    # 3. Sandbox container running
+    if _compose ps 2>/dev/null | grep -q "sandbox.*Up\|sandbox.*running"; then
+        echo "[OK] Sandbox container is running"
+    else
+        echo "[FAIL] Sandbox container is not running"
+        ((issues++))
+    fi
+
+    # 4. Egress proxy running
+    if _compose ps 2>/dev/null | grep -q "egress.*Up\|egress.*running"; then
+        echo "[OK] Egress proxy is running"
+    else
+        echo "[FAIL] Egress proxy is not running"
+        ((issues++))
+    fi
+
+    # 5. SSH connectivity
+    if _ssh "echo ok" &>/dev/null; then
+        echo "[OK] SSH to sandbox works"
+    else
+        echo "[FAIL] Cannot SSH to sandbox"
+        ((issues++))
+    fi
+
+    # 6. SSH key exists
+    if [ -f "$AGENTBOX_DIR/id_agentbox" ]; then
+        echo "[OK] SSH key exists"
+    else
+        echo "[FAIL] SSH key missing at $AGENTBOX_DIR/id_agentbox"
+        ((issues++))
+    fi
+
+    # 7. .env file
+    if [ -f "$AGENTBOX_DIR/.env" ]; then
+        echo "[OK] .env file exists"
+    else
+        echo "[FAIL] .env file missing"
+        ((issues++))
+    fi
+
+    # 8. Squid config rendered
+    if [ -f "$AGENTBOX_DIR/egress/squid.conf" ]; then
+        echo "[OK] Squid config rendered"
+    else
+        echo "[FAIL] Squid config not rendered (run install.sh)"
+        ((issues++))
+    fi
+
+    # 9. iptables rules
+    if iptables -L DOCKER-USER -n 2>/dev/null | grep -q "172.30"; then
+        echo "[OK] iptables rules present"
+    else
+        echo "[WARN] iptables egress rules may be missing"
+        ((warnings++))
+    fi
+
+    # 10. Disk space
+    local avail
+    avail=$(df -BG "$AGENTBOX_DIR" 2>/dev/null | tail -1 | awk '{print $4}' | tr -d 'G')
+    if [ "${avail:-0}" -lt 5 ] 2>/dev/null; then
+        echo "[WARN] Low disk space: ${avail}G available"
+        ((warnings++))
+    else
+        echo "[OK] Disk space: ${avail:-unknown}G available"
+    fi
+
+    # 11. Preset valid
+    if [ -f "$AGENTBOX_DIR/agents/$AGENTBOX_PRESET/agent.env" ]; then
+        echo "[OK] Preset '$AGENTBOX_PRESET' exists"
+    else
+        echo "[FAIL] Active preset '$AGENTBOX_PRESET' not found"
+        ((issues++))
+    fi
+
+    echo ""
+    if [ "$issues" -eq 0 ] && [ "$warnings" -eq 0 ]; then
+        echo "All checks passed."
+    else
+        echo "$issues issue(s), $warnings warning(s)."
+    fi
+
+    if [ "$fix" = "--fix" ]; then
+        echo ""
+        echo "Attempting automatic fixes..."
+        if [ ! -f "$AGENTBOX_DIR/egress/squid.conf" ] && [ -f "$AGENTBOX_DIR/egress/squid.conf.template" ]; then
+            sed -e 's/{{CACHE_MEM}}/256/' -e 's/{{MAX_OBJ_SIZE}}/64/' \
+                "$AGENTBOX_DIR/egress/squid.conf.template" > "$AGENTBOX_DIR/egress/squid.conf"
+            echo "  Fixed: rendered squid.conf"
+        fi
+        if [ ! -f "$AGENTBOX_DIR/egress/allowlist.txt" ] && [ -f "$AGENTBOX_DIR/egress/allowlist.base.txt" ]; then
+            cp "$AGENTBOX_DIR/egress/allowlist.base.txt" "$AGENTBOX_DIR/egress/allowlist.txt"
+            echo "  Fixed: copied allowlist"
+        fi
+        # Restart stack if containers not running
+        if ! _compose ps 2>/dev/null | grep -q "sandbox.*Up\|sandbox.*running"; then
+            echo "  Restarting stack..."
+            _compose up -d
+        fi
+        echo "Fix attempt complete. Run 'sandctl doctor' again to verify."
+    fi
+
+    [ "$issues" -eq 0 ]
+}
+
+# --- Level 2 Commands -- SAFE quoting is critical ---
+
+cmd_workspace_exec() {
+    _require_running
+    # Pass arguments safely to SSH -- each arg is properly quoted
+    _ssh "cd /workspace && $(printf '%q ' "$@")"
+}
+
+cmd_read_file() {
+    _require_running
+    local path="$1"
+    # Validate path: must not contain ".." or start with "/"
+    case "$path" in
+        ../*|*/../*|/*) echo "Error: path must be relative to /workspace" >&2; exit 1 ;;
+    esac
+    _ssh "cat -- '/workspace/$path'"
+}
+
+cmd_write_file() {
+    _require_running
+    local path="$1"
+    case "$path" in
+        ../*|*/../*|/*) echo "Error: path must be relative to /workspace" >&2; exit 1 ;;
+    esac
+    # Pipe stdin directly to SSH -- no intermediate variable capture
+    # This preserves binary data and trailing newlines
+    _ssh "cat > '/workspace/$path'"
+}
+
+cmd_list_files() {
+    _require_running
+    local depth="${1:-3}"
+    _ssh "find /workspace -maxdepth '$depth' -not -path '*/.agentbox/*' -not -path '*/.git/*' | sort"
+}
+
+cmd_upload() {
+    _require_running
+    local local_path="$1"
+    local remote_path="${2:-.}"
+    [ -f "$local_path" ] || { echo "Error: local file not found: $local_path" >&2; exit 1; }
+    _scp "$local_path" "agent@localhost:/workspace/$remote_path"
+    echo "Uploaded: $local_path -> /workspace/$remote_path"
+}
+
+cmd_download() {
+    _require_running
+    local remote_path="$1"
+    local local_path="${2:-.}"
+    _scp "agent@localhost:/workspace/$remote_path" "$local_path"
+    echo "Downloaded: /workspace/$remote_path -> $local_path"
+}
+
+# --- Level 3 Commands -- Runtime Management ---
+
+cmd_run() {
+    _require_running
+    _load_preset "$AGENTBOX_PRESET"
+
+    if [ "$START_MODE" != "background" ]; then
+        echo "Error: preset '$AGENTBOX_PRESET' has START_MODE=$START_MODE (not background)."
+        echo "Use 'sandctl ssh' to interact with this preset manually."
+        exit 1
+    fi
+
+    # Check if already running
+    if _ssh "test -f /workspace/.agentbox/runtime.pid && kill -0 \$(cat /workspace/.agentbox/runtime.pid) 2>/dev/null" 2>/dev/null; then
+        local pid
+        pid=$(_ssh "cat /workspace/.agentbox/runtime.pid")
+        echo "Runtime already running (pid=$pid). Use 'sandctl stop' first."
+        exit 1
+    fi
+
+    echo "Starting $AGENT_ID runtime..."
+
+    # Ensure log directory exists
+    local log_dir
+    log_dir=$(dirname "$LOG_PATH")
+    _ssh "mkdir -p '$log_dir'"
+
+    # Start the agent in background via SSH
+    # nohup + disown ensures it survives SSH disconnect
+    _ssh "cd $DEFAULT_WORKDIR && nohup $START_CMD >> $LOG_PATH 2>&1 & echo \$! > /workspace/.agentbox/runtime.pid && disown"
+
+    # Save autostart intent on host
+    mkdir -p "$AGENTBOX_STATE_DIR"
+    cat > "$AGENTBOX_STATE_DIR/runtime.json" <<EOF
+{"preset":"$AGENTBOX_PRESET","autostart":true,"started":"$(date -Iseconds)"}
+EOF
+
+    local pid
+    pid=$(_ssh "cat /workspace/.agentbox/runtime.pid" 2>/dev/null || echo "unknown")
+    echo "Runtime started (pid=$pid)."
+
+    # Health check loop
+    if [ -n "${HEALTHCHECK_CMD:-}" ]; then
+        echo -n "Waiting for health check..."
+        for i in $(seq 1 30); do
+            if _ssh "$HEALTHCHECK_CMD" &>/dev/null; then
+                echo " healthy!"
+                return 0
+            fi
+            sleep 1
+            echo -n "."
+        done
+        echo " timeout (process may still be starting)."
+        echo "Check: sandctl runtime logs"
+    fi
+}
+
+cmd_stop() {
+    _require_running
+
+    if _ssh "test -f /workspace/.agentbox/runtime.pid" 2>/dev/null; then
+        local pid
+        pid=$(_ssh "cat /workspace/.agentbox/runtime.pid" 2>/dev/null || echo "")
+        if [ -n "$pid" ]; then
+            echo "Stopping runtime (pid=$pid)..."
+            _ssh "kill $pid 2>/dev/null; sleep 1; kill -0 $pid 2>/dev/null && kill -9 $pid 2>/dev/null; rm -f /workspace/.agentbox/runtime.pid" || true
+        fi
+    fi
+
+    # Remove autostart intent
+    rm -f "$AGENTBOX_STATE_DIR/runtime.json"
+    echo "Runtime stopped."
+}
+
+cmd_ps() {
+    _require_running
+    echo "=== Runtime Status ==="
+
+    if _ssh "test -f /workspace/.agentbox/runtime.pid && kill -0 \$(cat /workspace/.agentbox/runtime.pid) 2>/dev/null" 2>/dev/null; then
+        local pid
+        pid=$(_ssh "cat /workspace/.agentbox/runtime.pid")
+        echo "Status: running"
+        echo "PID: $pid"
+        echo "Preset: $AGENTBOX_PRESET"
+        echo ""
+        echo "Process details:"
+        _ssh "ps -p $pid -o pid,user,comm,etime,rss,vsz --no-headers" 2>/dev/null || echo "  (process info unavailable)"
+        echo ""
+        if [ -f "$AGENTBOX_STATE_DIR/runtime.json" ]; then
+            echo "Autostart: enabled"
+            echo "State: $(cat "$AGENTBOX_STATE_DIR/runtime.json")"
+        fi
+    else
+        echo "Status: not running"
+        if [ -f "$AGENTBOX_STATE_DIR/runtime.json" ]; then
+            echo "Autostart intent: present (runtime crashed or was killed)"
+            echo "State: $(cat "$AGENTBOX_STATE_DIR/runtime.json")"
+        fi
+    fi
+}
+
+cmd_runtime_logs() {
+    _require_running
+    _load_preset "$AGENTBOX_PRESET"
+
+    if [ -z "${LOG_PATH:-}" ]; then
+        echo "Error: preset '$AGENTBOX_PRESET' does not define LOG_PATH" >&2
+        exit 1
+    fi
+
+    if [ "${1:-}" = "-f" ]; then
+        _ssh "tail -f '$LOG_PATH' 2>/dev/null || echo '(no log file yet)'"
+    else
+        _ssh "tail -100 '$LOG_PATH' 2>/dev/null || echo '(no log file yet)'"
+    fi
+}
+
+cmd_runtime_restart() {
+    cmd_stop
+    sleep 2
+    cmd_run
+}
+
+# --- Internal Command: _autostart ---
+
+cmd_autostart() {
+    if [ ! -f "$AGENTBOX_STATE_DIR/runtime.json" ]; then
+        return 0
+    fi
+
+    local preset
+    preset=$(jq -r '.preset // empty' "$AGENTBOX_STATE_DIR/runtime.json" 2>/dev/null || echo "")
+    local autostart
+    autostart=$(jq -r '.autostart // false' "$AGENTBOX_STATE_DIR/runtime.json" 2>/dev/null || echo "false")
+
+    if [ "$autostart" = "true" ] && [ -n "$preset" ]; then
+        echo "Autostart: restoring runtime for preset '$preset'..."
+        # Wait for SSH to be ready
+        for i in $(seq 1 30); do
+            if _ssh "echo ok" &>/dev/null; then
+                AGENTBOX_PRESET="$preset"
+                cmd_run
+                return $?
+            fi
+            sleep 2
+        done
+        echo "Autostart: SSH not ready after 60s, skipping." >&2
+    fi
+}
+
+# --- Main Command Router ---
+
+usage() {
+    cat <<'EOF'
+sandctl - Agentbox control tool v0.1.0
+
+Usage: sandctl <command> [options]
+
+Level 1 (Sandbox):
+  up                          Start the sandbox stack
+  down                        Stop the sandbox stack
+  restart                     Restart the sandbox stack
+  status                      Show stack status
+  logs [--tail N] [service]   View container logs
+  ssh [command...]            SSH into the sandbox
+  agent list                  List available presets
+  agent use <preset>          Switch to a different preset
+  egress reload               Reload proxy allowlist
+  doctor [--fix]              Run health checks
+
+Level 2 (Workspace):
+  workspace exec -- <cmd...>  Execute command in workspace
+  read-file <path>            Read file from workspace (stdout)
+  write-file <path>           Write stdin to file in workspace
+  list-files [depth]          List workspace files
+  upload <local> [remote]     Upload file to workspace
+  download <remote> [local]   Download file from workspace
+
+Level 3 (Runtime):
+  run                         Start background agent runtime
+  stop                        Stop background agent runtime
+  ps                          Show runtime status
+  runtime logs [-f]           View runtime logs
+  runtime restart             Restart the runtime
+
+Other:
+  version                     Show version
+  help                        Show this help
+EOF
+}
+
+main() {
+    _load_config
+
+    case "${1:-help}" in
+        up)         cmd_up ;;
+        down)       cmd_down ;;
+        restart)    cmd_restart ;;
+        status)     cmd_status ;;
+        logs)       shift; cmd_logs "$@" ;;
+        ssh)        shift; cmd_ssh "$@" ;;
+        agent)
+            case "${2:-}" in
+                list)   cmd_agent_list ;;
+                use)    cmd_agent_use "${3:?Usage: sandctl agent use <preset>}" ;;
+                *)      echo "Usage: sandctl agent {list|use <preset>}" >&2; exit 1 ;;
+            esac ;;
+        egress)
+            case "${2:-}" in
+                reload) cmd_egress_reload ;;
+                *)      echo "Usage: sandctl egress reload" >&2; exit 1 ;;
+            esac ;;
+        doctor)     shift; cmd_doctor "$@" ;;
+        workspace)
+            case "${2:-}" in
+                exec)
+                    shift 2
+                    # Strip optional "--" separator
+                    [ "${1:-}" = "--" ] && shift
+                    cmd_workspace_exec "$@" ;;
+                *)  echo "Usage: sandctl workspace exec -- <command...>" >&2; exit 1 ;;
+            esac ;;
+        read-file)  cmd_read_file "${2:?Usage: sandctl read-file <path>}" ;;
+        write-file) cmd_write_file "${2:?Usage: sandctl write-file <path>}" ;;
+        list-files) cmd_list_files "${2:-3}" ;;
+        upload)     cmd_upload "${2:?Usage: sandctl upload <local> [remote]}" "${3:-}" ;;
+        download)   cmd_download "${2:?Usage: sandctl download <remote> [local]}" "${3:-}" ;;
+        run)        cmd_run ;;
+        stop)       cmd_stop ;;
+        ps)         cmd_ps ;;
+        runtime)
+            case "${2:-}" in
+                logs)       shift 2; cmd_runtime_logs "${1:-}" ;;
+                restart)    cmd_runtime_restart ;;
+                *)          echo "Usage: sandctl runtime {logs [-f]|restart}" >&2; exit 1 ;;
+            esac ;;
+        _autostart) cmd_autostart ;;
+        version)    echo "sandctl $SANDCTL_VERSION" ;;
+        help|--help|-h) usage ;;
+        *)          echo "Unknown command: $1" >&2; usage; exit 1 ;;
+    esac
+}
+
+main "$@"

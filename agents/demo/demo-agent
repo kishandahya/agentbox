@@ -1,0 +1,29 @@
+#!/bin/bash
+# /usr/local/bin/demo-agent -- deterministic demo agent for testing
+set -euo pipefail
+
+STATE_DIR="/workspace/.agentbox/demo"
+LOG_FILE="$STATE_DIR/server.log"
+PID_FILE="$STATE_DIR/agent.pid"
+HEALTH_FILE="$STATE_DIR/healthy"
+
+mkdir -p "$STATE_DIR"
+echo $$ > "$PID_FILE"
+
+cleanup() {
+    rm -f "$HEALTH_FILE" "$PID_FILE"
+    echo "[$(date -Iseconds)] demo-agent stopped" >> "$LOG_FILE"
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
+
+echo "[$(date -Iseconds)] demo-agent starting" >> "$LOG_FILE"
+sleep 1
+touch "$HEALTH_FILE"
+echo "[$(date -Iseconds)] demo-agent healthy" >> "$LOG_FILE"
+
+# Heartbeat loop
+while true; do
+    echo "[$(date -Iseconds)] demo-agent heartbeat" >> "$LOG_FILE"
+    sleep 10
+done
