@@ -111,22 +111,34 @@ copy_repo_files() {
     fi
 
     log "Copying repo files to $AGENTBOX_DIR..."
-    # Copy all relevant files, preserving attributes
-    cp -a "$SCRIPT_DIR/compose.yaml" "$AGENTBOX_DIR/"
-    cp -a "$SCRIPT_DIR/egress" "$AGENTBOX_DIR/"
-    cp -a "$SCRIPT_DIR/systemd" "$AGENTBOX_DIR/"
-    cp -a "$SCRIPT_DIR/agents" "$AGENTBOX_DIR/"
-    cp -a "$SCRIPT_DIR/install.sh" "$AGENTBOX_DIR/"
+    # Use rsync if available (preserves everything, handles deletions of old files)
+    # Fall back to cp -a for each component
+    if command -v rsync &>/dev/null; then
+        rsync -a --exclude='.git' --exclude='.env' --exclude='id_agentbox*' \
+              --exclude='egress/squid.conf' --exclude='egress/allowlist.txt' \
+              --exclude='state/' \
+              "$SCRIPT_DIR/" "$AGENTBOX_DIR/"
+    else
+        # Core files
+        cp -a "$SCRIPT_DIR/compose.yaml" "$AGENTBOX_DIR/"
+        cp -a "$SCRIPT_DIR/install.sh" "$AGENTBOX_DIR/"
+        cp -a "$SCRIPT_DIR/egress" "$AGENTBOX_DIR/"
+        cp -a "$SCRIPT_DIR/systemd" "$AGENTBOX_DIR/"
+        cp -a "$SCRIPT_DIR/agents" "$AGENTBOX_DIR/"
 
-    # Copy sandctl if it exists
-    if [ -f "$SCRIPT_DIR/sandctl" ]; then
-        cp -a "$SCRIPT_DIR/sandctl" "$AGENTBOX_DIR/"
+        # sandctl
+        [ -f "$SCRIPT_DIR/sandctl" ] && cp -a "$SCRIPT_DIR/sandctl" "$AGENTBOX_DIR/"
+
+        # Tests and scripts
+        [ -d "$SCRIPT_DIR/tests" ] && cp -a "$SCRIPT_DIR/tests" "$AGENTBOX_DIR/"
+        [ -d "$SCRIPT_DIR/scripts" ] && cp -a "$SCRIPT_DIR/scripts" "$AGENTBOX_DIR/"
+        [ -d "$SCRIPT_DIR/docs" ] && cp -a "$SCRIPT_DIR/docs" "$AGENTBOX_DIR/"
+
+        # Other top-level files
+        for f in .env.example LICENSE README.md SKILL.md; do
+            [ -f "$SCRIPT_DIR/$f" ] && cp -a "$SCRIPT_DIR/$f" "$AGENTBOX_DIR/" || true
+        done
     fi
-
-    # Copy any other top-level files that may exist
-    for f in "$SCRIPT_DIR"/.env.example "$SCRIPT_DIR"/LICENSE "$SCRIPT_DIR"/README.md; do
-        [ -f "$f" ] && cp -a "$f" "$AGENTBOX_DIR/" || true
-    done
 
     log "Files copied to $AGENTBOX_DIR."
 }

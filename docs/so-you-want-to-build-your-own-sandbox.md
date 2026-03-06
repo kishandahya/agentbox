@@ -26,6 +26,7 @@ limits resources, and locks down the filesystem:
 
 ```yaml
 cap_drop: [ALL]
+cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SYS_CHROOT, AUDIT_WRITE, KILL]
 cpus: 2
 mem_limit: 4g
 pids_limit: 512
@@ -33,11 +34,14 @@ security_opt: [no-new-privileges]
 tmpfs: ["/tmp:size=512m,noexec,nosuid"]
 ```
 
-`cap_drop: [ALL]` means no `NET_RAW` (no raw sockets, no ping, no ARP spoofing), no `SYS_ADMIN` (no 
-mounting filesystems), no `DAC_OVERRIDE` (no bypassing file permissions). `no-new-privileges` 
-prevents setuid binaries from escalating. `pids_limit: 512` stops fork bombs. The `tmpfs` mount for 
-`/tmp` is `noexec` and `nosuid`, so even if an agent writes a binary there, it can't execute it 
-directly.
+`cap_drop: [ALL]` removes every Linux capability, then `cap_add` restores the minimum set that sshd 
+actually needs to function: SETUID/SETGID for privilege dropping after auth, DAC_OVERRIDE and CHOWN 
+for the entrypoint to set up SSH keys, SYS_CHROOT for sshd internals, AUDIT_WRITE for login records, 
+and KILL for process signaling. Critically absent: no `NET_RAW` (no raw sockets, no ping, no ARP 
+spoofing), no `SYS_ADMIN` (no mounting filesystems), no `NET_ADMIN` (no network configuration). 
+`no-new-privileges` prevents setuid binaries from escalating. `pids_limit: 512` stops fork bombs. 
+The `tmpfs` mount for `/tmp` is `noexec` and `nosuid`, so even if an agent writes a binary there, it 
+can't execute it directly.
 
 Why rootful Docker over rootless? Rootless Docker has real networking limitations — you lose the 
 ability to create proper bridge networks with fixed subnets, which we need for egress control. 

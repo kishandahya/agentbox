@@ -227,6 +227,15 @@ security_opt:
   - no-new-privileges         # Prevent SUID/SGID escalation
 cap_drop:
   - ALL                       # Drop ALL Linux capabilities
+cap_add:                       # Add back minimum for sshd to function
+  - CHOWN                      # entrypoint chowns workspace state
+  - DAC_OVERRIDE               # root writes to agent-owned dirs
+  - FOWNER                     # entrypoint copies authorized_keys
+  - SETUID                     # sshd drops privileges after auth
+  - SETGID                     # sshd drops privileges after auth
+  - SYS_CHROOT                 # sshd chroot calls
+  - AUDIT_WRITE                # sshd login records
+  - KILL                       # signal child processes
 cpus: 2                       # CPU limit
 mem_limit: 4g                 # Memory limit (hard)
 memswap_limit: 4g             # No swap (same as mem_limit)

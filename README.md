@@ -124,7 +124,7 @@ sandctl doctor --fix           # Attempt automatic fixes
 ## Security Model
 
 What's enforced:
-- Dropped ALL capabilities (no NET_RAW, no SYS_ADMIN, nothing)
+- Dropped ALL capabilities, then add back only the minimum (CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, SYS_CHROOT, AUDIT_WRITE, KILL -- required for sshd). No NET_RAW, no SYS_ADMIN, no NET_ADMIN.
 - `no-new-privileges` security option
 - CPU (2 cores), memory (4GB), PID (512) limits
 - Restricted tmpfs for /tmp (noexec, nosuid, 512MB)

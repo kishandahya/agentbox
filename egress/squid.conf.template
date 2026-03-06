@@ -49,9 +49,14 @@ cache_dir ufs /var/spool/squid 1000 16 256
 cache_replacement_policy heap LFUDA
 memory_replacement_policy heap GDSF
 
-# ---------- Logging to stdout/stderr for docker logs ----------
-access_log stdio:/dev/stdout
-cache_log stdio:/dev/stderr
+# ---------- Logging ----------
+# Log to /var/log/squid/ which the ubuntu/squid image pre-creates with correct
+# permissions for the 'proxy' user. stdio:/dev/stdout fails because /dev/stdout
+# is owned by root and squid drops privileges to 'proxy'.
+# View logs with: docker logs agentbox-egress-proxy (image tails these)
+# Or: sandctl workspace exec -- cat /var/log/squid/access.log (from sandbox)
+access_log /var/log/squid/access.log
+cache_log /var/log/squid/cache.log
 cache_store_log none
 
 # ---------- Privacy / identity ----------

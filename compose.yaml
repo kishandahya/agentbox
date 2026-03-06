@@ -24,7 +24,23 @@ services:
       - no-new-privileges
     cap_drop:
       - ALL
-    # NET_RAW deliberately omitted -- no ping, smaller attack surface
+    cap_add:
+      # Minimum caps for sshd + entrypoint to function:
+      # CHOWN/FOWNER: entrypoint copies authorized_keys and chowns workspace state
+      # DAC_OVERRIDE: root writes to agent-owned dirs during setup
+      # SETUID/SETGID: sshd drops privileges to run as 'agent' user after auth
+      # SYS_CHROOT: sshd uses ChrootDirectory-related chroot() calls
+      # AUDIT_WRITE: sshd writes login records to /var/log
+      # KILL: entrypoint/agent needs to signal child processes
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
+      - SYS_CHROOT
+      - AUDIT_WRITE
+      - KILL
+    # Explicitly NOT added: NET_RAW, SYS_ADMIN, SYS_PTRACE, NET_ADMIN, MKNOD, etc.
     cpus: 2
     mem_limit: 4g
     memswap_limit: 4g
@@ -52,6 +68,7 @@ services:
     volumes:
       - ./egress/squid.conf:/etc/squid/squid.conf:ro
       - ./egress/allowlist.txt:/etc/squid/allowlist.txt:ro
+      - squid-logs:/var/log/squid
     networks:
       proxy-net:
       egress-net:
@@ -81,3 +98,4 @@ networks:
 
 volumes:
   agentbox-workspace:
+  squid-logs:
