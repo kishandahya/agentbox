@@ -125,7 +125,7 @@ The tradeoff: SSH adds ~50ms of latency per command invocation (key exchange, ch
 /workspace/.agentbox/                # Agentbox state directory
 /workspace/.agentbox/runtime.pid     # PID of background agent process
 /workspace/.agentbox/<preset>/       # Preset-specific state
-/workspace/.agentbox/opencode/       #   e.g., opencode server logs
+/workspace/.agentbox/opencode/       #   e.g., opencode serve logs
 /workspace/.agentbox/opencode/server.log
 ```
 
@@ -176,8 +176,8 @@ START_MODE=background          # "background" or "manual"
 Background presets (`START_MODE=background`) add:
 
 ```bash
-START_CMD="opencode server --host 127.0.0.1 --port 3000"
-HEALTHCHECK_CMD="curl -sf http://127.0.0.1:3000/health"
+START_CMD="opencode serve --host 127.0.0.1 --port 4096"
+HEALTHCHECK_CMD="curl -sf http://127.0.0.1:4096/global/health"
 LOG_PATH=/workspace/.agentbox/opencode/server.log
 ACCESS_MODE=ssh
 EXPOSE_PORTS=""

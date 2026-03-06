@@ -34,7 +34,7 @@ Those are Level 4. This is Level 3. See [docs/so-you-want-to-build-your-own-sand
 ### Install
 
 ```bash
-git clone https://github.com/vorflux/agentbox.git
+git clone https://github.com/kishandahya/agentbox.git
 cd agentbox
 sudo AGENTBOX_PRESET=opencode ./install.sh
 ```
