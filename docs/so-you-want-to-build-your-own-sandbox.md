@@ -89,9 +89,11 @@ proxy. For HTTPS, the client sends a `CONNECT` request with the hostname in plai
 checks it against an allowlist, and if approved, opens a raw TCP tunnel to the destination. The 
 proxy never sees the encrypted payload. This is boring and correct.
 
-We use Squid. The network topology is two internal Docker networks with fixed subnets: one for the 
-sandbox, one for the proxy. The sandbox can only reach the proxy. The proxy can reach the internet. 
-Belt-and-suspenders iptables rules in the `DOCKER-USER` chain enforce this at the host level:
+We use Squid. The network topology is Docker networks with fixed subnets: one for the sandbox (not 
+marked internal, because Docker cannot publish host ports into containers on purely internal 
+networks), one internal network connecting sandbox to proxy, and one external network for the proxy. 
+The sandbox can only reach the proxy. The proxy can reach the internet. iptables rules in the 
+`DOCKER-USER` chain are the real enforcement layer at the host level:
 
 ```bash
 # Drop direct internet access from sandbox subnet

@@ -80,8 +80,12 @@ services:
     restart: unless-stopped
 
 networks:
+  # sandbox-net: NOT internal. Docker cannot publish ports (2222:22) into
+  # containers that are exclusively on internal networks. The real egress
+  # restriction comes from iptables DOCKER-USER rules that DROP traffic from
+  # 172.30.0.0/24 to destinations outside the Docker range, plus the proxy-net
+  # isolation. See docs/architecture.md for the full explanation.
   sandbox-net:
-    internal: true
     ipam:
       config:
         - subnet: 172.30.0.0/24

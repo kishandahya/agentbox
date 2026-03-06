@@ -44,7 +44,7 @@ The host talks to the sandbox exclusively via SSH (port 2222 on the host mapped 
 
 Three Docker networks, each with a fixed subnet:
 
-- **sandbox-net** (`172.30.0.0/24`, `internal: true`): The sandbox's isolated network. Marked internal, so Docker does not attach it to any bridge with external access. The sandbox sits on this network for intra-container isolation. No traffic from this network can reach the internet.
+- **sandbox-net** (`172.30.0.0/24`): The sandbox's primary network. This network is NOT marked `internal` because Docker cannot publish host ports (e.g., `2222:22` for SSH) into containers that are exclusively on internal networks. Egress restriction is enforced by iptables DOCKER-USER rules that DROP traffic from this subnet to destinations outside the Docker range, not by the Docker network flag.
 
 - **proxy-net** (`172.30.1.0/24`, `internal: true`): Communication channel between the sandbox and the egress proxy. Also internal -- no external access. The sandbox and egress-proxy both attach to this network. The sandbox sends HTTP(S) requests to `egress-proxy:3128` over this network.
 
@@ -277,7 +277,7 @@ ip6tables -A DOCKER-USER \
     -m comment --comment "agentbox-rule" -j DROP
 ```
 
-Why this matters: Docker's `internal: true` network flag prevents external routing at the Docker level. The iptables rules are a second layer in case Docker's network isolation has bugs or is misconfigured. Fixed subnets make these rules deterministic -- we always know `172.30.0.0/24` is the sandbox.
+Why this matters: The `sandbox-net` network is intentionally not marked `internal` because Docker cannot publish host ports into containers on purely internal networks (the SSH port mapping `2222:22` would silently fail). The iptables DOCKER-USER rules are the real enforcement layer that prevents the sandbox from reaching the internet directly. `proxy-net` remains `internal: true` because neither the sandbox nor the proxy needs host port access on that network. Fixed subnets make the iptables rules deterministic -- we always know `172.30.0.0/24` is the sandbox.
 
 Rules are persisted via `iptables-persistent` / `netfilter-persistent` so they survive host reboots. If persistence fails, the rules are re-applied by `install.sh` on next run. The `sandctl doctor` command checks for their presence.
 
