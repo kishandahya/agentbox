@@ -190,6 +190,7 @@ write_env_file() {
             done
         fi
     } > "$AGENTBOX_DIR/.env"
+    chmod 600 "$AGENTBOX_DIR/.env"
 
     log ".env written to $AGENTBOX_DIR/.env"
 }

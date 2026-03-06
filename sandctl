@@ -20,6 +20,10 @@ _load_config() {
 
 # --- SSH Helpers -- CRITICAL: Proper quoting ---
 
+# StrictHostKeyChecking=no is deliberate: the sandbox container regenerates SSH host
+# keys on every rebuild. The connection is to localhost (the host's own port mapping),
+# so there is no MITM risk in this specific usage.
+
 # Non-interactive SSH (for commands)
 _ssh() {
     ssh -o StrictHostKeyChecking=no \
@@ -282,6 +286,9 @@ cmd_doctor() {
             cp "$AGENTBOX_DIR/egress/allowlist.base.txt" "$AGENTBOX_DIR/egress/allowlist.txt"
             echo "  Fixed: copied allowlist"
         fi
+        if ! iptables -L DOCKER-USER -n 2>/dev/null | grep -q "172.30"; then
+            echo "  NOTE: Run install.sh again to re-apply iptables rules"
+        fi
         # Restart stack if containers not running
         if ! _compose ps 2>/dev/null | grep -q "sandbox.*Up\|sandbox.*running"; then
             echo "  Restarting stack..."
@@ -295,6 +302,21 @@ cmd_doctor() {
 
 # --- Level 2 Commands -- SAFE quoting is critical ---
 
+# Validate path: reject absolute paths, ".." components, and null bytes
+_validate_workspace_path() {
+    local path="$1"
+    case "$path" in
+        /*) echo "Error: path must be relative to /workspace, not absolute" >&2; return 1 ;;
+    esac
+    if [[ "$path" == *".."* ]]; then
+        echo "Error: path must not contain '..' components" >&2; return 1
+    fi
+    if [[ "$path" == *$'\0'* ]]; then
+        echo "Error: path must not contain null bytes" >&2; return 1
+    fi
+    return 0
+}
+
 cmd_workspace_exec() {
     _require_running
     # Pass arguments safely to SSH -- each arg is properly quoted
@@ -304,19 +326,14 @@ cmd_workspace_exec() {
 cmd_read_file() {
     _require_running
     local path="$1"
-    # Validate path: must not contain ".." or start with "/"
-    case "$path" in
-        ../*|*/../*|/*) echo "Error: path must be relative to /workspace" >&2; exit 1 ;;
-    esac
+    _validate_workspace_path "$path" || exit 1
     _ssh "cat -- '/workspace/$path'"
 }
 
 cmd_write_file() {
     _require_running
     local path="$1"
-    case "$path" in
-        ../*|*/../*|/*) echo "Error: path must be relative to /workspace" >&2; exit 1 ;;
-    esac
+    _validate_workspace_path "$path" || exit 1
     # Pipe stdin directly to SSH -- no intermediate variable capture
     # This preserves binary data and trailing newlines
     _ssh "cat > '/workspace/$path'"

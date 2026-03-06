@@ -33,9 +33,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # OpenClaw -- emerging project, install method may change
-RUN npm install -g openclaw 2>/dev/null \
-    || pip3 install openclaw 2>/dev/null \
-    || echo "WARN: openclaw install failed -- install manually after boot"
+RUN npm install -g openclaw \
+    || pip3 install openclaw \
+    || { echo "WARNING: openclaw install failed. Install manually after boot: npm install -g openclaw"; true; }
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
