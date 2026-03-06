@@ -33,8 +33,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # Codex CLI -- install may fail if package name changes
-RUN npm install -g @openai/codex 2>/dev/null \
-    || echo "WARN: codex install failed -- install manually via: npm install -g @openai/codex"
+RUN npm install -g @openai/codex \
+    || { echo "WARNING: codex install failed. Install manually via: npm install -g @openai/codex"; true; }
+
+# Install ChatGPT OAuth plugin (enables ChatGPT Max/Plus subscription auth)
+RUN npm install -g opencode-openai-codex-auth@latest 2>/dev/null \
+    || echo "WARN: opencode-openai-codex-auth install failed -- install manually: npx -y opencode-openai-codex-auth@latest"
+
+# Configure ChatGPT OAuth plugin
+RUN npx -y opencode-openai-codex-auth@latest 2>/dev/null || true
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

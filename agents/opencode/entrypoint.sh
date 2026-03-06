@@ -24,8 +24,10 @@ if [ -n "${HTTP_PROXY:-}" ]; then
     } >> /home/agent/.bashrc
 fi
 
-# --- API Key Passthrough ---
-for var in ANTHROPIC_API_KEY OPENAI_API_KEY; do
+# --- API Key / OAuth Token Passthrough ---
+# ChatGPT OAuth is the default auth path (via opencode-openai-codex-auth plugin).
+# API keys are kept as fallback for users who prefer direct API access.
+for var in ANTHROPIC_API_KEY OPENAI_API_KEY CHATGPT_OAUTH_TOKEN; do
     if [ -n "${!var:-}" ]; then
         echo "export ${var}='${!var}'" >> /home/agent/.bashrc
     fi

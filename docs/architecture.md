@@ -169,7 +169,7 @@ AGENT_ID=opencode             # Unique preset identifier
 BASE_IMAGE=ubuntu:24.04       # Base Docker image
 DEFAULT_CMD=/bin/bash          # Default command for interactive sessions
 DEFAULT_WORKDIR=/workspace     # Working directory
-REQUIRED_ENV_VARS="ANTHROPIC_API_KEY"  # Vars that must be set in .env
+REQUIRED_ENV_VARS=""                   # Vars that must be set in .env (empty = OAuth default)
 START_MODE=background          # "background" or "manual"
 ```
 
@@ -184,6 +184,21 @@ EXPOSE_PORTS=""
 ```
 
 Manual presets (`START_MODE=manual`) omit the background fields. They're for agents like `codex`, `claude`, and `openclaw` whose CLIs are interactive and don't have a headless server mode.
+
+### Authentication Model
+
+Agentbox uses **ChatGPT OAuth** as the default authentication method for all presets (except `demo`). This is powered by the [`opencode-openai-codex-auth`](https://www.npmjs.com/package/opencode-openai-codex-auth) plugin, which enables ChatGPT Max/Plus subscription-based access to GPT-5.x and Codex models without requiring API keys.
+
+**How it works:**
+
+1. The plugin is installed during the Docker image build (`npm install -g opencode-openai-codex-auth@latest`).
+2. On first boot, the user SSHs in and runs `opencode auth login`, which initiates an OAuth flow via `auth.openai.com`.
+3. The user copies a URL into their browser, completes the ChatGPT login, and pastes the result back. This works in headless/SSH environments (no browser needed on the server).
+4. After authentication, the Codex backend at `chatgpt.com/backend-api` is used for model requests.
+
+**Fallback:** API keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are still supported. If set in `.env`, they are passed through to the agent environment via the entrypoint. This lets users who prefer direct API access bypass the OAuth flow.
+
+The egress allowlist includes `auth.openai.com` and `chatgpt.com` to support the OAuth flow and Codex backend traffic.
 
 ### How compose.yaml Uses Presets
 

@@ -36,8 +36,10 @@ Those are Level 4. This is Level 3. See [docs/so-you-want-to-build-your-own-sand
 ```bash
 git clone https://github.com/vorflux/agentbox.git
 cd agentbox
-sudo ANTHROPIC_API_KEY=sk-ant-... ./install.sh
+sudo AGENTBOX_PRESET=opencode ./install.sh
 ```
+
+No API keys required -- agentbox uses ChatGPT OAuth by default (via the `opencode-openai-codex-auth` plugin). API keys are supported as an optional fallback.
 
 The installer:
 - Checks for Ubuntu 22.04/24.04
@@ -47,6 +49,21 @@ The installer:
 - Sets up iptables egress rules
 - Builds and starts the stack
 - Symlinks `sandctl` to `/usr/local/bin`
+
+### First-time Auth Setup
+
+After install, complete the one-time ChatGPT OAuth login:
+
+```bash
+sandctl ssh                    # SSH into the sandbox
+opencode auth login            # Prints a URL -- copy it
+# Open the URL in your browser, complete the OAuth flow
+# Paste the result back into the terminal
+exit                           # Return to host
+sandctl run                    # Start the agent
+```
+
+This uses your ChatGPT Max/Plus subscription. Models available include `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex`, `gpt-5.1-codex-mini`, and `gpt-5.1`. For headless/SSH environments, the plugin supports a manual URL paste mode (no browser needed on the server).
 
 ### Run the OpenCode Agent
 
@@ -126,13 +143,13 @@ See [docs/threat-model.md](docs/threat-model.md) for the full threat model.
 
 ## Agent Presets
 
-| Preset   | Mode       | Description                      | Required Keys        |
-|----------|------------|----------------------------------|----------------------|
-| opencode | background | OpenCode headless server         | ANTHROPIC_API_KEY    |
-| codex    | manual     | OpenAI Codex CLI via SSH         | OPENAI_API_KEY       |
-| claude   | manual     | Claude Code CLI via SSH          | ANTHROPIC_API_KEY    |
-| openclaw | manual     | OpenClaw via SSH                 | ANTHROPIC_API_KEY    |
-| demo     | background | Deterministic test agent (no API keys) | none          |
+| Preset   | Mode       | Description                      | Required Keys                  |
+|----------|------------|----------------------------------|--------------------------------|
+| opencode | background | OpenCode headless server         | none (ChatGPT OAuth default)   |
+| codex    | manual     | OpenAI Codex CLI via SSH         | none (ChatGPT OAuth default)   |
+| claude   | manual     | Claude Code CLI via SSH          | none (ANTHROPIC_API_KEY if used with Anthropic API) |
+| openclaw | manual     | OpenClaw via SSH                 | none (ChatGPT OAuth default)   |
+| demo     | background | Deterministic test agent (no API keys) | none                   |
 
 **Background** presets support `sandctl run/stop/ps` for managed lifecycle.
 **Manual** presets are SSH-first: use `sandctl ssh` and run the agent interactively.

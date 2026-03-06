@@ -1,6 +1,9 @@
 # AI providers
 .openai.com
 .anthropic.com
+# ChatGPT OAuth / Codex backend
+.auth.openai.com
+.chatgpt.com
 # Package managers
 .pypi.org
 .files.pythonhosted.org

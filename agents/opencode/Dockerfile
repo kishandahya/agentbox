@@ -35,9 +35,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 
 # Install opencode via official installer
 # Falls back to npm if the curl installer fails
-RUN curl -fsSL https://opencode.ai/install | bash 2>/dev/null \
+RUN curl -fsSL https://opencode.ai/install | bash \
     || npm install -g opencode \
-    || echo "WARN: opencode install failed -- install manually after boot"
+    || { echo "WARNING: opencode install failed. Install manually after boot: curl -fsSL https://opencode.ai/install | bash"; true; }
+
+# Install ChatGPT OAuth plugin for opencode (enables ChatGPT Max/Plus subscription auth)
+RUN npm install -g opencode-openai-codex-auth@latest 2>/dev/null \
+    || echo "WARN: opencode-openai-codex-auth install failed -- install manually: npx -y opencode-openai-codex-auth@latest"
+
+# Configure opencode to use ChatGPT OAuth plugin
+RUN npx -y opencode-openai-codex-auth@latest 2>/dev/null || true
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

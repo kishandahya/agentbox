@@ -24,8 +24,9 @@ if [ -n "${HTTP_PROXY:-}" ]; then
     } >> /home/agent/.bashrc
 fi
 
-# --- API Key Passthrough ---
-for var in ANTHROPIC_API_KEY OPENAI_API_KEY; do
+# --- API Key / OAuth Token Passthrough ---
+# API keys and OAuth token passthrough. ANTHROPIC_API_KEY required if using Anthropic's API.
+for var in ANTHROPIC_API_KEY OPENAI_API_KEY CHATGPT_OAUTH_TOKEN; do
     if [ -n "${!var:-}" ]; then
         echo "export ${var}='${!var}'" >> /home/agent/.bashrc
     fi
