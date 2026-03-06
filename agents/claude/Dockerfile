@@ -36,7 +36,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 RUN npm install -g @anthropic-ai/claude-code \
     || { echo "WARNING: claude-code install failed. Install manually via: npm install -g @anthropic-ai/claude-code"; true; }
 
-COPY entrypoint.sh /entrypoint.sh
+COPY agents/claude/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]

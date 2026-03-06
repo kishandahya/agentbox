@@ -37,7 +37,7 @@ RUN npm install -g openclaw \
     || pip3 install openclaw \
     || { echo "WARNING: openclaw install failed. Install manually after boot: npm install -g openclaw"; true; }
 
-COPY entrypoint.sh /entrypoint.sh
+COPY agents/openclaw/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]

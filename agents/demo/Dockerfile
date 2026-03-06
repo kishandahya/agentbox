@@ -29,13 +29,13 @@ RUN useradd -m -s /bin/bash -G sudo agent \
 RUN mkdir -p /workspace && chown agent:agent /workspace
 
 # Demo agent -- deterministic test agent requiring no API keys
-COPY demo-agent /usr/local/bin/demo-agent
+COPY agents/demo/demo-agent /usr/local/bin/demo-agent
 RUN chmod +x /usr/local/bin/demo-agent
 
-COPY smoke.sh /usr/local/bin/smoke.sh
+COPY agents/demo/smoke.sh /usr/local/bin/smoke.sh
 RUN chmod +x /usr/local/bin/smoke.sh
 
-COPY entrypoint.sh /entrypoint.sh
+COPY agents/demo/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]

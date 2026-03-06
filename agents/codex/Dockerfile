@@ -43,7 +43,7 @@ RUN npm install -g opencode-openai-codex-auth@latest 2>/dev/null \
 # Configure ChatGPT OAuth plugin
 RUN npx -y opencode-openai-codex-auth@latest 2>/dev/null || true
 
-COPY entrypoint.sh /entrypoint.sh
+COPY agents/codex/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 22
 ENTRYPOINT ["/entrypoint.sh"]
