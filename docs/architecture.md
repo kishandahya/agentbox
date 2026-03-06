@@ -262,8 +262,9 @@ iptables -I DOCKER-USER 2 -s 172.30.0.0/24 -d 172.30.1.0/24 \
 iptables -I DOCKER-USER 3 -s 172.30.0.0/24 ! -d 172.30.0.0/16 \
     -m comment --comment "agentbox-rule" -j DROP
 
-# IPv6: block all sandbox traffic (defense in depth)
-ip6tables -A DOCKER-USER -s 172.30.0.0/24 \
+# IPv6: block all Docker container IPv6 traffic (defense in depth)
+# agentbox uses IPv4-only networks; blanket DROP prevents IPv6 bypass
+ip6tables -A DOCKER-USER \
     -m comment --comment "agentbox-rule" -j DROP
 ```
 

@@ -240,10 +240,12 @@ setup_iptables() {
     iptables -C DOCKER-USER -m comment --comment "agentbox-rule" -j RETURN 2>/dev/null \
         || iptables -A DOCKER-USER -m comment --comment "agentbox-rule" -j RETURN
 
-    # IPv6: explicit drop for sandbox subnet (defense in depth)
+    # IPv6: drop ALL container IPv6 traffic in DOCKER-USER (defense in depth)
+    # We use a blanket DROP for any traffic hitting DOCKER-USER over IPv6, since
+    # agentbox uses IPv4-only Docker networks. Cannot use IPv4 subnets in ip6tables.
     ip6tables -N DOCKER-USER 2>/dev/null || true
-    ip6tables -C DOCKER-USER -s "$SANDBOX_NET" -m comment --comment "agentbox-rule" -j DROP 2>/dev/null \
-        || ip6tables -A DOCKER-USER -s "$SANDBOX_NET" -m comment --comment "agentbox-rule" -j DROP
+    ip6tables -C DOCKER-USER -m comment --comment "agentbox-rule" -j DROP 2>/dev/null \
+        || ip6tables -A DOCKER-USER -m comment --comment "agentbox-rule" -j DROP
 
     # Persist rules
     if command -v netfilter-persistent &>/dev/null; then
