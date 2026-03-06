@@ -96,10 +96,12 @@ The sandbox can only reach the proxy. The proxy can reach the internet. iptables
 `DOCKER-USER` chain are the real enforcement layer at the host level:
 
 ```bash
-# Drop direct internet access from sandbox subnet
-iptables -I DOCKER-USER -s 172.20.0.0/24 -o eth0 -j DROP
-# Allow sandbox -> proxy only
-iptables -I DOCKER-USER -s 172.20.0.0/24 -d 172.21.0.0/24 -j ACCEPT
+# Allow established connections (responses to outbound requests)
+iptables -I DOCKER-USER 1 -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+# Allow sandbox -> proxy on port 3128 (the egress path)
+iptables -I DOCKER-USER 2 -s 172.30.0.0/24 -d 172.30.1.0/24 -p tcp --dport 3128 -j RETURN
+# Drop all other traffic from sandbox to external destinations
+iptables -I DOCKER-USER 3 -s 172.30.0.0/24 ! -d 172.30.0.0/16 -j DROP
 ```
 
 The Squid configuration is a simple domain allowlist. Adding a new allowed domain is a one-line 
@@ -211,6 +213,46 @@ enables checkpointing agent work, sharing sandbox state, and disaster recovery.
 The key architectural advice: keep SSH as the boundary between host and sandbox. Don't replace it 
 with a custom protocol or Docker exec. SSH gives you auth, encryption, multiplexing, and file 
 transfer for free. Build everything above it.
+
+## Lessons from First Deploy
+
+We deployed agentbox on a Hetzner CPX22 (2 vCPU, 4GB RAM, 80GB disk, Ubuntu 24.04). Three bugs 
+surfaced that are worth discussing because they represent the kind of thing that only shows up on a 
+real host.
+
+**Bug 1: `cap_drop: [ALL]` breaks sshd.** The original compose.yaml dropped every Linux capability. 
+This is correct in principle -- you want the smallest possible set -- but sshd needs SETUID and 
+SETGID to drop privileges after authentication, DAC_OVERRIDE and CHOWN for the entrypoint to write 
+to agent-owned directories, and SYS_CHROOT for internal sshd operations. Without these, the 
+entrypoint crashed on the first `cp` command (copying the authorized_keys file into the agent's home 
+directory). The fix: `cap_drop: [ALL]` followed by `cap_add` with exactly the eight capabilities 
+sshd requires. The lesson: do not guess which capabilities you need. Run the container, watch it 
+fail, and add capabilities one at a time until it works. Then stop.
+
+**Bug 2: Squid cannot write to `/dev/stdout` in the ubuntu/squid image.** The squid.conf template 
+originally used `access_log stdio:/dev/stdout` for Docker-native log collection. This works in many 
+Squid setups, but the `ubuntu/squid` image drops privileges to the `proxy` user, and `/dev/stdout` is 
+owned by root. Squid hit a fatal error on startup. The fix: log to `/var/log/squid/access.log` 
+(the image creates this directory with correct permissions for the `proxy` user) and mount a named 
+volume for log persistence. The lesson: if you use a third-party Docker image, check what user it 
+runs as and whether your config is compatible with that user's permissions.
+
+**Bug 3: Docker cannot publish ports into containers on `internal: true` networks.** The original 
+design put the sandbox on two internal networks (`sandbox-net` and `proxy-net`). The intent was 
+belt-and-suspenders: iptables blocks direct egress, and `internal: true` provides a second layer. 
+The problem: Docker's port publishing (`ports: "2222:22"`) works by creating a proxy process on the 
+host that forwards traffic into the container. This proxy needs a routable path to the container, 
+which internal networks do not provide. `docker port agentbox-sandbox` returned nothing. SSH 
+connections to port 2222 were refused. The fix: remove `internal: true` from `sandbox-net` and rely 
+on iptables DOCKER-USER rules as the primary enforcement layer. `proxy-net` remains internal because 
+neither container needs host port access on that network. The lesson: `internal: true` and host port 
+publishing are mutually exclusive. If you need both isolation and published ports, use iptables.
+
+These bugs are subtle and do not surface in `docker compose config` validation, unit tests, or even 
+`docker compose up -d` (which succeeds silently). They only appear when you try to actually use the 
+running system. This is why integration testing on a real host matters, and why a smoke test 
+(`scripts/smoke-test.sh`) that actually SSHes into the sandbox is more valuable than any amount of 
+YAML linting.
 
 ## Decision Summary
 
